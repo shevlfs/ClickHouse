@@ -952,11 +952,23 @@ try
             underlying_buf = std_out.get();
         }
 
+        /// Clearing the progress bar before the data is flushed is only needed when the data
+        /// can interleave with the progress rendering on the same terminal: when the data
+        /// itself is written to the terminal, into a pager (which draws to the terminal),
+        /// or, for a client embedded into the server, into the same stream where the progress
+        /// is rendered. If the data goes to a pipe or a file while the progress is rendered
+        /// on the terminal, keep the progress bar in place: clearing it before every data
+        /// block would only make it flicker (issue #80056).
+        const bool data_interleaves_with_progress = stdout_is_a_tty || pager_cmd != nullptr || isEmbeeddedClient();
+
         /// Use the flush callback wrapper to prevent progress flickering
         std_out_wrapper = std::make_unique<FlushCallbackWriteBuffer>(
             underlying_buf,
-            [this]()
+            [this, data_interleaves_with_progress]()
             {
+                if (!data_interleaves_with_progress)
+                    return;
+
                 /// If results are written INTO OUTFILE, we can avoid clearing progress to avoid flicker.
                 if (need_render_progress && tty_buf && (!select_into_file || select_into_file_and_stdout))
                 {
